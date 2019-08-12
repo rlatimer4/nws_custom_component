@@ -32,11 +32,11 @@ or comma separated values
 
 Optionally, you may also include a which statuses to monitor with the below configuration option below.  
 By default all status types will be tracked.
-'''
+```
   status_types:
     - actual
     - test
     - draft
     - exercise
     - system
-'''
+```
