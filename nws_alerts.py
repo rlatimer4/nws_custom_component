@@ -2,7 +2,7 @@
 ---------------------------------------------------------
 NWS Alerts
 ---------------------------------------------------------
-VERSION: 0.0.2
+VERSION: 0.0.3
 Forum: https://community.home-assistant.io/t/severe-weather-alerts-from-the-us-national-weather-service/71853
 
 API Documentation
@@ -30,33 +30,44 @@ MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=1)
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_NAME = 'NWS Alerts'
 CONF_ZONE_ID = 'zone_id'
-ZONE_ID = ''
+CONF_STATUS_TYPES = 'status_types'
+
+DEFAULT_STATUS_TYPES = [
+    'actual',
+    'exercise',
+    'system',
+    'test',
+    'draft'
+]
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_ZONE_ID): cv.string,
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
+    vol.Optional(CONF_STATUS_TYPES, default=DEFAULT_STATUS_TYPES): 
+        vol.All(cv.ensure_list, [vol.In(DEFAULT_STATUS_TYPES)])
 })
-
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the sensor platform."""
-    name = config.get(CONF_NAME, DEFAULT_NAME)
+    name = config.get(CONF_NAME)
     zone_id = config.get(CONF_ZONE_ID)
-    add_devices([NWSAlertSensor(name, zone_id)])
-
+    status_types = config[CONF_STATUS_TYPES]
+    add_devices([NWSAlertSensor(name, zone_id, status_types)])
 
 class NWSAlertSensor(Entity):
     """Representation of a Sensor."""
 
-    def __init__(self, name, zone_id):
+    def __init__(self, name, zone_id, status_types):
         """Initialize the sensor."""
         self._name = name
         self._icon = DEFAULT_ICON
         self._state = 0
         self._event = None
+        self._severity = None
         self._display_desc = None
         self._spoken_desc = None
         self._zone_id = zone_id.replace(' ', '')
+        self._status_types = status_types
         self.update()
 
     @property
@@ -78,6 +89,7 @@ class NWSAlertSensor(Entity):
     def device_state_attributes(self):
         """Return the state message."""
         attributes = {"title": self._event,
+                      "severity": self._severity,
                       "display_desc": self._display_desc,
                       "spoken_desc": self._spoken_desc
                       }
@@ -92,12 +104,14 @@ class NWSAlertSensor(Entity):
         values = self.get_state()
         self._state = values['state']
         self._event = values['event']
+        self._severity = values['severity']
         self._display_desc = values['display_desc']
         self._spoken_desc = values['spoken_desc']
 
     def get_state(self):
         values = {'state': 0,
                   'event': None,
+                  'severity': None,
                   'display_desc': None,
                   'spoken_desc': None
                   }
@@ -121,6 +135,7 @@ class NWSAlertSensor(Entity):
     def get_alerts(self):
         values = {'state': 0,
                   'event': None,
+                  'severity': None,
                   'display_desc': None,
                   'spoken_desc': None
                   }
@@ -134,29 +149,53 @@ class NWSAlertSensor(Entity):
         if r.status_code == 200:
             events = []
             headlines = []
+            severity = []
+            severity_level = 0
             display_desc = ''
             spoken_desc = ''
             features = r.json()['features']
             for alert in features:
-                event = alert['properties']['event']
-                if 'NWSheadline' in alert['properties']['parameters']:
-                    headline = alert['properties']['parameters']['NWSheadline'][0]
+                status = alert['properties']['status']
+                if status.lower() in self._status_types:
+                    event = alert['properties']['event']
+                    if 'NWSheadline' in alert['properties']['parameters']:
+                        headline = alert['properties']['parameters']['NWSheadline'][0]
+                    else:
+                        headline = event
+                    new_severity = alert['properties']['severity']
+                    new_severity = new_severity.capitalize()
+                    description = alert['properties']['description']
+                    instruction = alert['properties']['instruction']
+                    
+                    if event in events:
+                        continue
+                    
+                    if new_severity == 'Unknown':
+                        new_severity_level = 0
+                    elif new_severity == 'Minor':
+                        new_severity_level = 1
+                    elif new_severity == 'Moderate':
+                        new_severity_level = 2
+                    elif new_severity == 'Severe':
+                        new_severity_level = 3
+                    elif new_severity == 'Extreme':
+                        new_severity_level = 4
+                    
+                    if new_severity_level > severity_level:
+                        severity_level = new_severity_level
+                    
+
+                    
+                    events.append(event)
+                    headlines.append(headline)
+                    severity.append(new_severity)
+                    
+                    if display_desc != '':
+                        display_desc += '\n\n'
+                    
+                    display_desc += '%s\n%s\n%s\n%s' % (event, headline, description, instruction)
                 else:
-                    headline = event
-
-                description = alert['properties']['description']
-                instruction = alert['properties']['instruction']
-
-                if event in events:
                     continue
-
-                events.append(event)
-                headlines.append(headline)
-
-                if display_desc != '':
-                    display_desc += '\n\n'
-
-                display_desc += '<b>%s</b>\n%s\n%s\n%s' % (event, headline, description, instruction)
 
             if headlines:
                 num_headlines = len(headlines)
@@ -177,12 +216,13 @@ class NWSAlertSensor(Entity):
                     if event_str != '':
                         event_str += ' - '
                     event_str += item
-
-                values['state'] = len(events)
+                
+#                values['state'] = len(events)
+                values['state'] = severity_level
+                values['severity'] = severity
                 values['event'] = event_str
                 values['display_desc'] = display_desc
                 values['spoken_desc'] = spoken_desc
 
         return values
-
 
