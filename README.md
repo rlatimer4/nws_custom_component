@@ -16,6 +16,8 @@ For HA .92 and higher (add a empty file named __init__.py to the folder nws_aler
 <config directory>/custom_components/nws_alerts/__init__.py
 ```
 
+sensor state now reflects the highest severity level of the alerts, ranging from 0-4 (unkown to extreme).
+
 To create an sensor instance add to your sensor definitions:
 ```
 - platform: nws_alerts
@@ -27,3 +29,14 @@ or comma separated values
 - platform: nws_alerts
   zone_id: 'PAC049,WVC031'
 ```
+
+Optionally, you may also include a which statuses to monitor with the below configuration option below.  
+By default all status types will be tracked.
+'''
+  status_types:
+    - actual
+    - test
+    - draft
+    - exercise
+    - system
+'''
